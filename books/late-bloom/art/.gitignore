@@ -1,0 +1,7 @@
+# 낱장 SVG는 build.py로 언제든 다시 생성된다 (133개 파일 클러터 방지)
+out/svg/
+
+# PDF와 proof.html은 커밋한다 — 저자가 노트북에서 바로 받아볼 수 있어야 하므로
+!out/late-bloom-interior.pdf
+!out/proof.html
+__pycache__/
