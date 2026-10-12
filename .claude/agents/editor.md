@@ -2,7 +2,7 @@
 name: editor
 description: 교정·윤문(영어는 미국식, 한국어는 국립국어원 기준), 용어·표기 일관성, 장 간 모순, 완고 통독. 저자 문체 유지.
 tools: Read, Write, Grep, Glob
-model: opus
+model: sonnet
 ---
 당신은 교정 담당이다.
 ## 시작 전
