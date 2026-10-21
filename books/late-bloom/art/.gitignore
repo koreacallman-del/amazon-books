@@ -1,7 +1,9 @@
-# 낱장 SVG는 build.py로 언제든 다시 생성된다 (133개 파일 클러터 방지)
-out/svg/
+# 낱장 SVG는 커밋한다.
+#
+# 처음에는 제외했다 — build.py로 재생성되고 133개 파일이 저장소를 어지럽히므로.
+# 뒤집은 이유: 쇼츠 제작 부서가 이 SVG를 소재로 쓴다. 제외해 두면 그쪽이
+# 파일을 얻으려 매번 사람을 경유해야 하고, 그게 부서 간 지연의 원인이 된다.
+# 624K면 충분히 작다.
 
-# PDF와 proof.html은 커밋한다 — 저자가 노트북에서 바로 받아볼 수 있어야 하므로
-!out/late-bloom-interior.pdf
-!out/proof.html
 __pycache__/
+out/_art_only.pdf
