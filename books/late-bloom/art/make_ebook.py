@@ -206,7 +206,12 @@ def build():
             c.drawImage(as_jpeg(img), (TRIM - w) / 2, TRIM - IMG_TOP - h,
                         w, h, mask=None)
             if lines:
-                dense = len(lines) >= DENSE_N
+                # 저자가 워드에서 문장을 합쳐 한 줄이 84자까지 나온다.
+                # 자동 줄바꿈 뒤의 실제 줄 수로 크기를 정해야 넘치지 않는다.
+                width = TRIM - SIDE * 2 - 0.9 * PT
+                n_wrapped = sum(len(wrap(c, ln, width, BODY, FONT))
+                                for ln in lines)
+                dense = n_wrapped >= DENSE_N
                 size = DENSE_BODY if dense else BODY
                 lead = DENSE_LEAD if dense else LEAD
                 c.setFont(FONT, size)
