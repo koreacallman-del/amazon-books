@@ -58,13 +58,10 @@ def image_map():
 
 
 def paper_of(path, cache={}):
-    """그림 모서리 색 = 그 쪽의 바탕색."""
+    """그림 가장자리 색 = 그 쪽의 바탕색."""
     if path in cache:
         return cache[path]
-    im = Image.open(path).convert("RGB")
-    w, h = im.size
-    px = [im.getpixel(xy) for xy in ((2, 2), (w - 3, 2), (2, h - 3), (w - 3, h - 3))]
-    r, g, b = (sum(c[i] for c in px) // len(px) for i in range(3))
+    r, g, b = edge_color(Image.open(path).convert("RGB"))
     cache[path] = Color(r / 255, g / 255, b / 255)
     return cache[path]
 
@@ -73,10 +70,51 @@ DEFAULT_PAPER = Color(253 / 255, 248 / 255, 238 / 255)
 
 JPEG_Q = 88          # 전자책용. 화면에서 열화가 보이지 않는 선
 MAX_PX = 1536        # 원본 그대로. 7.3in에 넣으면 약 210dpi
+FEATHER = 40         # 그림 가장자리를 바탕색으로 풀어주는 폭(px)
+
+# 조판 기준 — 전부 고정값이다. 쪽마다 달라지면 책장을 넘길 때 글이 뛴다.
+IMG_TOP = 78.0                   # 그림 위 여백
+TEXT_Y = 150.0                   # 본문 첫 줄 기준선 (쪽 아래에서)
+BODY = 14.0                      # 본문 크기 — 폰에서 읽히는 하한
+LEAD = 23.0
+DENSE_N = 6                      # 이 줄 수 이상이면 촘촘하게
+DENSE_BODY, DENSE_LEAD = 12.5, 20.0
+
+
+def edge_color(im):
+    """가장자리 띠의 평균색. 모서리 한 점보다 정확하다.
+
+    그림 안쪽은 종이 결과 비네팅 때문에 변 중간 밝기가 모서리와 다르다.
+    모서리 한 점으로 바탕을 맞추면 네모 윤곽이 희미하게 남는다.
+    """
+    w, h = im.size
+    b = max(4, min(w, h) // 120)
+    px = []
+    for strip in (im.crop((0, 0, w, b)), im.crop((0, h - b, w, h)),
+                  im.crop((0, 0, b, h)), im.crop((w - b, 0, w, h))):
+        s = strip.resize((1, 1), Image.LANCZOS)
+        px.append(s.getpixel((0, 0)))
+    return tuple(sum(c[i] for c in px) // len(px) for i in range(3))
+
+
+def feather_mask(size, px):
+    """가장자리에서 안쪽으로 서서히 불투명해지는 마스크."""
+    w, h = size
+    m = Image.new("L", size, 255)
+    draw_px = m.load()
+    for i in range(px):
+        v = int(255 * (i + 1) / (px + 1))
+        for x in range(w):
+            draw_px[x, i] = min(draw_px[x, i], v)
+            draw_px[x, h - 1 - i] = min(draw_px[x, h - 1 - i], v)
+        for y in range(h):
+            draw_px[i, y] = min(draw_px[i, y], v)
+            draw_px[w - 1 - i, y] = min(draw_px[w - 1 - i, y], v)
+    return m
 
 
 def as_jpeg(path, cache={}):
-    """PNG를 JPEG로 바꿔 메모리에 올린다.
+    """PNG를 JPEG로 바꾸고 가장자리를 바탕색으로 풀어 메모리에 올린다.
 
     PNG는 무손실이라 그대로 넣으면 133쪽이 288MB가 된다. 전자책은 화면에서
     보는 것이므로 그 용량이 의미가 없고, 배송비와 내려받기 시간만 늘린다.
@@ -88,18 +126,20 @@ def as_jpeg(path, cache={}):
         r = MAX_PX / max(im.size)
         im = im.resize((round(im.width * r), round(im.height * r)),
                        Image.LANCZOS)
+    bg = Image.new("RGB", im.size, edge_color(im))
+    bg.paste(im, (0, 0), feather_mask(im.size, FEATHER))
     buf = io.BytesIO()
-    im.save(buf, "JPEG", quality=JPEG_Q, optimize=True, progressive=True)
+    bg.save(buf, "JPEG", quality=JPEG_Q, optimize=True, progressive=True)
     buf.seek(0)
     cache[path] = ImageReader(buf)
     return cache[path]
 
 
-def wrap(c, text, width, size):
+def wrap(c, text, width, size, font):
     """글자 단위 줄바꿈. 한국어는 단어 경계가 덜 중요하다."""
     out, cur = [], ""
     for ch in text:
-        if c.stringWidth(cur + ch, FONT, size) > width and cur:
+        if c.stringWidth(cur + ch, font, size) > width and cur:
             out.append(cur)
             cur = ch
         else:
@@ -109,11 +149,12 @@ def wrap(c, text, width, size):
     return out
 
 
-def draw_text(c, lines, top_y, size, lead, center=False):
+def draw_text(c, lines, top_y, size, lead, center=False, font=None):
+    font = font or FONT
     c.setFillColorRGB(0.11, 0.10, 0.09)
     y = top_y
     for ln in lines:
-        for seg in wrap(c, ln, TRIM - SIDE * 2 - 0.9 * PT, size):
+        for seg in wrap(c, ln, TRIM - SIDE * 2 - 0.9 * PT, size, font):
             if center:
                 c.drawCentredString(TRIM / 2, y, seg)
             else:
@@ -140,34 +181,36 @@ def build():
         lines = texts.get(n, [])
 
         if n == 1:                                   # 표제지
-            c.setFont(FONT_B, 26)
-            draw_text(c, lines[:1], TRIM * 0.56, 26, 34, center=True)
-            c.setFont(FONT, 12.5)
+            c.setFont(FONT_B, 34)
+            draw_text(c, lines[:1], TRIM * 0.57, 34, 44, center=True, font=FONT_B)
+            c.setFont(FONT, 17)
             c.setFillColorRGB(0.36, 0.33, 0.30)
-            draw_text(c, lines[1:], TRIM * 0.47, 12.5, 18, center=True)
+            draw_text(c, lines[1:], TRIM * 0.46, 17, 24, center=True)
 
         elif n == 133:                               # 작가의 말
-            c.setFont(FONT_B, 14)
-            draw_text(c, lines[:1], TRIM - 1.7 * PT, 14, 22, center=True)
-            c.setFont(FONT, 10.5)
-            draw_text(c, lines[1:], TRIM - 2.8 * PT, 10.5, 18)
+            c.setFont(FONT_B, 19)
+            draw_text(c, lines[:1], TRIM - 1.7 * PT, 19, 28, center=True, font=FONT_B)
+            c.setFont(FONT, 12)
+            draw_text(c, lines[1:], TRIM - 3.0 * PT, 12, 19.5)
 
         elif n in CHAPTER_PAGES:                     # 장 제목
-            c.setFont(FONT_B, 16)
-            draw_text(c, lines, TRIM * 0.52, 16, 26, center=True)
+            c.setFont(FONT_B, 22)
+            draw_text(c, lines, TRIM * 0.52, 22, 32, center=True, font=FONT_B)
 
         else:
             iw, ih = Image.open(img).size
             w = IMG_W
             h = w * ih / iw
-            x = (TRIM - w) / 2
-            # 글이 길수록 그림을 위로 올려 자리를 비운다
-            nlines = sum(1 for _ in lines)
-            y = TRIM - 1.15 * PT - h if nlines >= 3 else (TRIM - h) / 2 + 0.5 * PT
-            c.drawImage(as_jpeg(img), x, y, w, h, mask=None)
+            # 그림 위치와 글 높이를 쪽마다 고정한다. 책장을 넘길 때 글이
+            # 같은 자리에 있어야 책처럼 읽힌다.
+            c.drawImage(as_jpeg(img), (TRIM - w) / 2, TRIM - IMG_TOP - h,
+                        w, h, mask=None)
             if lines:
-                c.setFont(FONT, 11.5)
-                draw_text(c, lines, y - 0.52 * PT, 11.5, 18.5)
+                dense = len(lines) >= DENSE_N
+                size = DENSE_BODY if dense else BODY
+                lead = DENSE_LEAD if dense else LEAD
+                c.setFont(FONT, size)
+                draw_text(c, lines, TEXT_Y, size, lead)
 
         c.showPage()
 
